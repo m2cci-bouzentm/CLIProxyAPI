@@ -1,0 +1,11 @@
+{
+  "name": "cliproxyapi-cursor-bridge",
+  "private": true,
+  "type": "module",
+  "description": "OpenAI chat-completions bridge for the CLIProxyAPI cursor provider, backed by @cursor/sdk",
+  "main": "index.mjs",
+  "engines": { "node": ">=22" },
+  "dependencies": {
+    "@cursor/sdk": "1.2.0"
+  }
+}

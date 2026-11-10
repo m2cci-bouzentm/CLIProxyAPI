@@ -252,6 +252,8 @@ func firstNonEmptyString(values ...*string) string {
 	return ""
 }
 
+const cursorExchangeURL = "https://api2.cursor.sh/auth/exchange_user_api_key"
+
 func tokenValueForAuth(auth *coreauth.Auth) string {
 	if auth == nil {
 		return ""
@@ -290,7 +292,63 @@ func (h *Handler) resolveTokenForAuth(ctx context.Context, auth *coreauth.Auth, 
 		return token, errToken
 	}
 
+	if strings.EqualFold(strings.TrimSpace(auth.Provider), "cursor") {
+		token, errToken := h.exchangeCursorAccessToken(ctx, auth, requestProxyURL)
+		return token, errToken
+	}
+
 	return tokenValueForAuth(auth), nil
+}
+
+// exchangeCursorAccessToken exchanges the stored Cursor API key for a short-lived access token,
+// which the Cursor dashboard endpoints (plan and usage) accept.
+func (h *Handler) exchangeCursorAccessToken(ctx context.Context, auth *coreauth.Auth, requestProxyURL string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	apiKey := tokenValueForAuth(auth)
+	if apiKey == "" {
+		return "", fmt.Errorf("cursor credential has no api_key")
+	}
+	req, errReq := http.NewRequestWithContext(ctx, http.MethodPost, cursorExchangeURL, strings.NewReader("{}"))
+	if errReq != nil {
+		return "", errReq
+	}
+	req.Header.Set("Authorization", "Bearer "+apiKey)
+	req.Header.Set("Content-Type", "application/json")
+
+	httpClient := &http.Client{
+		Timeout:   defaultAPICallTimeout,
+		Transport: h.apiCallTransport(auth, requestProxyURL),
+	}
+	resp, errDo := httpClient.Do(req)
+	if errDo != nil {
+		return "", errDo
+	}
+	defer func() {
+		if errClose := resp.Body.Close(); errClose != nil {
+			log.Errorf("response body close error: %v", errClose)
+		}
+	}()
+
+	bodyBytes, errRead := io.ReadAll(resp.Body)
+	if errRead != nil {
+		return "", errRead
+	}
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		return "", fmt.Errorf("cursor api key exchange failed: status %d", resp.StatusCode)
+	}
+
+	var tokenResp struct {
+		AccessToken string `json:"accessToken"`
+	}
+	if errUnmarshal := json.Unmarshal(bodyBytes, &tokenResp); errUnmarshal != nil {
+		return "", errUnmarshal
+	}
+	if strings.TrimSpace(tokenResp.AccessToken) == "" {
+		return "", fmt.Errorf("cursor api key exchange returned empty accessToken")
+	}
+	return strings.TrimSpace(tokenResp.AccessToken), nil
 }
 
 func (h *Handler) resolveXAIToken(ctx context.Context, auth *coreauth.Auth, requestProxyURL string) (string, error) {

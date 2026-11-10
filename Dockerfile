@@ -16,6 +16,16 @@ ARG BUILD_DATE=unknown
 
 RUN CGO_ENABLED=1 GOOS=linux go build -buildvcs=false -ldflags="-s -w -X 'main.Version=${VERSION}' -X 'main.Commit=${COMMIT}' -X 'main.BuildDate=${BUILD_DATE}'" -o ./CLIProxyAPI ./cmd/server/
 
+FROM node:24-bookworm-slim AS cursor-bridge
+
+WORKDIR /cursor-bridge
+
+COPY cursor-bridge/package.json cursor-bridge/package-lock.json ./
+
+RUN npm ci --omit=dev --ignore-scripts && npm cache clean --force
+
+COPY cursor-bridge/index.mjs ./
+
 FROM debian:bookworm
 
 RUN apt-get update && apt-get install -y --no-install-recommends tzdata ca-certificates && rm -rf /var/lib/apt/lists/*
@@ -25,6 +35,10 @@ RUN mkdir /CLIProxyAPI
 COPY --from=builder ./app/CLIProxyAPI /CLIProxyAPI/CLIProxyAPI
 
 COPY config.example.yaml /CLIProxyAPI/config.example.yaml
+
+COPY --from=cursor-bridge /usr/local/bin/node /usr/local/bin/node
+
+COPY --from=cursor-bridge /cursor-bridge /CLIProxyAPI/cursor-bridge
 
 WORKDIR /CLIProxyAPI
 
